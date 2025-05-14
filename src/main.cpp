@@ -1,13 +1,16 @@
 #include <GxEPD2_BW.h>
+#include <Fonts/FreeMonoBold18pt7b.h>
 #include <Fonts/FreeMonoBold24pt7b.h>
+#include <Fonts/FreeSans9pt7b.h>
 #include "AiEsp32RotaryEncoder.h"
 #include <Arduino.h>
+#include "logo.h"
 
 #define ROTARY_DT_PIN 34
 #define ROTARY_CLK_PIN 35
 #define ROTARY_SW_PIN 19
 #define ROTARY_VCC_PIN -1
-#define ROTARY_STEPS 4
+#define ROTARY_STEPS 2
 
 /*GxEPD2_BW<GxEPD2_290_BS, GxEPD2_290_BS::HEIGHT> display(GxEPD2_290_BS(5, 4, 2, 15));*/
 GxEPD2_BW<GxEPD2_213_BN, GxEPD2_213_BN::HEIGHT> display(GxEPD2_213_BN(/*CS=5*/ 5, /*DC=*/ 4, /*RES=*/ 2, /*BUSY=*/ 15)); // DEPG0213BN 122x250, SSD1680
@@ -71,44 +74,92 @@ void showCenteredText(const char* text) {
     } while (display.nextPage());
 }
 
-void showSplashScreen() {
+/*void showSplashScreen() {
   display.setRotation(1);
-  display.setFont(&FreeMonoBold24pt7b);
+  display.setFullWindow();
   display.setTextColor(GxEPD_BLACK);
+  display.setFont(&FreeMonoBold18pt7b);
 
   const char* title = "Studycount";
   const char* subtitle = "by Studycount Team";
 
-  // Get bounds for title
+  // Get text bounds
   int16_t x1, y1;
   uint16_t w, h;
   display.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
-  int titleX = (display.width() - w) / 2 - x1;
-  int titleY = display.height() / 2 - 10;
 
-  // Set smaller font for subtitle
-  display.setFont(NULL); // default font (small)
-  int16_t x2, y2;
-  uint16_t w2, h2;
-  display.getTextBounds(subtitle, 0, 0, &x2, &y2, &w2, &h2);
-  int subtitleX = (display.width() - w2) / 2 - x2;
-  int subtitleY = titleY + 30;
-
-  // Set window to full screen
-  display.setFullWindow();
+  // Calculate true center position
+  int textX = (display.width() - w) / 2 - x1;
+  int textY = (display.height() - h) / 2 - y1;
+  display.setFont(NULL); 
+  int subtitleX = (display.width() - w) / 2 - x1;
+  int subtitleY = textY + h + 20;
+  // Render splash
   display.firstPage();
   do {
+    display.setFont(&FreeMonoBold18pt7b);
     display.fillScreen(GxEPD_WHITE);
-    display.setFont(&FreeMonoBold24pt7b);
-    display.setCursor(titleX, titleY);
+    display.setCursor(textX, textY);
     display.print(title);
     display.setFont(NULL);
     display.setCursor(subtitleX, subtitleY);
     display.print(subtitle);
   } while (display.nextPage());
-
-  delay(5000); // Show for 5 seconds
+  delay(5000);
 }
+*/
+void showSplashScreen() {
+  display.setRotation(1);
+  display.setFullWindow();
+  
+  display.firstPage();
+  do {
+    display.drawBitmap((display.width() - logo_width) / 2, 10, logo_bits, logo_width, logo_height, GxEPD_BLACK);
+  } while (display.nextPage());
+  delay(5000);
+}
+int showMenu() {
+  int menuOption = 0;
+  const char* options[] = {"Pause for 5 min", "Choose another timer"};
+  const int numOptions = 2;
+
+  rotaryEncoder.setBoundaries(0, numOptions - 1, true); // navigation entre 0 et 1
+  rotaryEncoder.setEncoderValue(0);
+
+  while (true) {
+    if (rotaryEncoder.encoderChanged()) {
+      menuOption = rotaryEncoder.readEncoder();
+
+      display.setRotation(1);
+      display.setPartialWindow(0, 0, display.width(), display.height());
+      display.firstPage();
+      do {
+        display.fillScreen(GxEPD_WHITE);
+        for (int i = 0; i < numOptions; i++) {
+          int y = 40 + i * 30;
+          if (i == menuOption) {
+            display.fillRect(10, y - 15, display.width() - 20, 25, GxEPD_BLACK);
+            display.setTextColor(GxEPD_WHITE);
+          } else {
+            display.setTextColor(GxEPD_BLACK);
+          }
+          display.setCursor(20, y);
+          display.setFont(&FreeSans9pt7b); // petite police
+          display.print(options[i]);
+        }
+      } while (display.nextPage());
+    }
+
+    if (rotaryEncoder.isEncoderButtonClicked()) {
+      return menuOption;
+    }
+
+    delay(50);
+  }
+}
+
+
+
 
 void pomodoroCountdown(int minutes) {
   unsigned long totalMillis = (unsigned long)minutes * 60UL * 1000UL;
@@ -130,6 +181,7 @@ void pomodoroCountdown(int minutes) {
       char buffer[6];
       sprintf(buffer, "%02d:%02d", m, s);
       showCenteredText(buffer);
+      
 
       float progress = (float)elapsedMillis / totalMillis;
       drawProgressBar(progress);
@@ -139,11 +191,23 @@ void pomodoroCountdown(int minutes) {
   }
 
   showCenteredText("Break!");
-  drawProgressBar(1.0); // full bar
-  delay(5000);
+  drawProgressBar(1.0);
+  delay(3000);
+
+  int choice = showMenu();
+  if (choice == 0) {
+    pomodoroCountdown(5); // Pause de 5 minutes
+  } else {
+    // Retour au menu principal (affichage du temps sélectionné)
+    char buffer[6];
+    sprintf(buffer, "%02d:00", selectedMinutes);
+    showCenteredText(buffer);
+    rotaryEncoder.setBoundaries(1, 120, false); 
+  }
+
 }
 
-
+//****************************************SETUP**************************************** */
 void setup() {
   Serial.begin(115200);
 
@@ -154,9 +218,25 @@ void setup() {
   // Show splash screen
   showSplashScreen();
 
+  // Clear full screen after splash
+  display.setFullWindow();
+  display.firstPage();
+  do {
+    display.fillScreen(GxEPD_WHITE);
+  } while (display.nextPage());
+
+  // Enable pullups on encoder pins (HW-040 requires them)
+  pinMode(ROTARY_DT_PIN, INPUT_PULLUP);
+  pinMode(ROTARY_CLK_PIN, INPUT_PULLUP);
+  pinMode(ROTARY_SW_PIN, INPUT_PULLUP);
+
   // Setup rotary
   rotaryEncoder.begin();
   rotaryEncoder.setup(readEncoderISR);
+
+  // Optional: reverse direction if it turns backward
+  // rotaryEncoder.setDirection(REVERSE);
+
   rotaryEncoder.setBoundaries(1, 120, false);
   rotaryEncoder.setAcceleration(5);
 
@@ -165,7 +245,7 @@ void setup() {
   sprintf(buffer, "%02d:00", selectedMinutes);
   showCenteredText(buffer);
 }
-
+//****************************************LOOP**************************************** */
 void loop() {
   if (rotaryEncoder.encoderChanged() && !isTimerStarted && 
       (millis() - lastEncoderUpdate > encoderDebounce)) {
